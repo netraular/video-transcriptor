@@ -10,8 +10,8 @@ from pydub import AudioSegment
 load_dotenv()
 
 # Directories for input and output files
-INPUT_DIR = "input"
-OUTPUT_DIR = "output"
+INPUT_DIR = r"./input"
+OUTPUT_DIR = INPUT_DIR  # Save subtitles in the same directory
 
 # Model to use for transcription
 MODEL = "whisper-large-v3"
@@ -28,60 +28,11 @@ def format_srt_time(seconds):
     milliseconds = delta.microseconds // 1000
     return f"{hours:02}:{minutes:02}:{seconds:02},{milliseconds:03}"
 
-def main():
+def process_video(client, input_path, output_path):
     """
-    Main function to let the user select a video file, then extract its audio,
-    chunk it, transcribe it, and generate SRT captions.
+    Process a single video file: extract audio, transcribe, and save SRT.
     """
-    # --- 1. INITIALIZATION & SETUP ---
-    print("Caption Generation Script Started")
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-    api_key = os.environ.get("GROQ_API_KEY")
-    if not api_key:
-        print("Error: GROQ_API_KEY not found in .env file.")
-        return
-    client = Groq(api_key=api_key)
-    print("Groq client initialized.")
-
-    # --- MODIFICATION: FILE SELECTION MENU ---
-    # Find all available .mp4 files in the input directory
-    video_files = [f for f in os.listdir(INPUT_DIR) if f.endswith(".mp4")]
-
-    if not video_files:
-        print(f"Error: No .mp4 files found in the '{INPUT_DIR}' directory.")
-        return
-
-    # Display a numbered list of files for the user to choose from
-    print("\nPlease choose a file to transcribe:")
-    for i, filename in enumerate(video_files):
-        print(f"  [{i+1}] {filename}")
-    print()
-
-    # Loop until the user provides a valid choice
-    chosen_file = None
-    while True:
-        try:
-            choice_str = input(f"Enter the number of the file (1-{len(video_files)}): ")
-            choice_index = int(choice_str) - 1  # Convert to 0-based index
-
-            if 0 <= choice_index < len(video_files):
-                chosen_file = video_files[choice_index]
-                break  # Exit the loop with a valid choice
-            else:
-                print(f"Invalid number. Please enter a number between 1 and {len(video_files)}.")
-        except ValueError:
-            print("Invalid input. Please enter a number.")
-        except (KeyboardInterrupt, EOFError):
-            print("\nOperation cancelled by user.")
-            return
-
-    # --- PROCESSING THE CHOSEN FILE ---
-    print(f"\n--- Processing selected file: {chosen_file} ---\n")
-    
-    input_path = os.path.join(INPUT_DIR, chosen_file)
-    output_filename = os.path.splitext(chosen_file)[0] + ".srt"
-    output_path = os.path.join(OUTPUT_DIR, output_filename)
+    print(f"\n--- Processing file: {input_path} ---\n")
     
     # --- 2. AUDIO EXTRACTION & PREPARATION ---
     try:
@@ -92,7 +43,7 @@ def main():
         audio = audio.set_frame_rate(16000).set_channels(1)
         print("Audio prepared successfully.")
     except Exception as e:
-        print(f"Error during audio processing for {chosen_file}: {e}")
+        print(f"Error during audio processing for {input_path}: {e}")
         print("Please ensure FFmpeg is installed and accessible in your system's PATH.")
         return
 
@@ -147,8 +98,76 @@ def main():
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(srt_content)
 
-    print(f"\n✅ Caption generation complete for {chosen_file}!")
+    print(f"\n✅ Caption generation complete for {input_path}!")
     print(f"   Your SRT file is saved at: {output_path}")
+
+def main():
+    """
+    Main function to let the user select a folder, then process all mp4 files.
+    """
+    # --- 1. INITIALIZATION & SETUP ---
+    print("Caption Generation Script Started")
+    
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        print("Error: GROQ_API_KEY not found in .env file.")
+        return
+    client = Groq(api_key=api_key)
+    print("Groq client initialized.")
+
+    # --- FOLDER SELECTION ---
+    default_dir = INPUT_DIR
+    print(f"\nDefault directory: {default_dir}")
+    use_default = input("Use default directory? (y/n): ").strip().lower()
+    
+    if use_default == 'y':
+        target_dir = default_dir
+    else:
+        target_dir = input("Enter the directory path containing .mp4 files: ").strip()
+        # Remove quotes if user copied path as "path"
+        if target_dir.startswith('"') and target_dir.endswith('"'):
+            target_dir = target_dir[1:-1]
+    
+    if not os.path.isdir(target_dir):
+        print(f"Error: Directory '{target_dir}' does not exist.")
+        return
+
+    # --- RECURSIVE OPTION ---
+    recursive = input("Search recursively in subfolders? (y/n): ").strip().lower() == 'y'
+
+    # --- FIND FILES ---
+    video_files = []
+    if recursive:
+        for root, dirs, files in os.walk(target_dir):
+            for file in files:
+                if file.lower().endswith(".mp4"):
+                    video_files.append(os.path.join(root, file))
+    else:
+        video_files = [os.path.join(target_dir, f) for f in os.listdir(target_dir) if f.lower().endswith(".mp4")]
+
+    if not video_files:
+        print(f"No .mp4 files found in '{target_dir}'.")
+        return
+
+    print(f"\nFound {len(video_files)} video files.")
+    
+    # --- PROCESS FILES ---
+    for i, video_path in enumerate(video_files):
+        print(f"\n[{i+1}/{len(video_files)}] Processing: {video_path}")
+        
+        # Determine output path (same directory as video)
+        output_filename = os.path.splitext(os.path.basename(video_path))[0] + ".srt"
+        output_path = os.path.join(os.path.dirname(video_path), output_filename)
+        
+        if os.path.exists(output_path):
+            overwrite = input(f"Subtitle file already exists for {os.path.basename(video_path)}. Overwrite? (y/n): ").strip().lower()
+            if overwrite != 'y':
+                print("Skipping...")
+                continue
+                
+        process_video(client, video_path, output_path)
+
+    print("\nAll files processed.")
 
 if __name__ == "__main__":
     main()
