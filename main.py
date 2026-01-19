@@ -28,16 +28,16 @@ def format_srt_time(seconds):
     milliseconds = delta.microseconds // 1000
     return f"{hours:02}:{minutes:02}:{seconds:02},{milliseconds:03}"
 
-def process_video(client, input_path, output_path):
+def process_video(client, input_path, output_path, language="en", output_format="srt"):
     """
-    Process a single video file: extract audio, transcribe, and save SRT.
+    Process a single video file: extract audio, transcribe, and save SRT or TXT.
     """
     print(f"\n--- Processing file: {input_path} ---\n")
     
     # --- 2. AUDIO EXTRACTION & PREPARATION ---
     try:
-        print("Step 1: Extracting audio from video...")
-        audio = AudioSegment.from_file(input_path, "mp4")
+        print("Step 1: Extracting audio from file...")
+        audio = AudioSegment.from_file(input_path)
         
         print("Step 2: Preparing audio (converting to 16kHz mono)...")
         audio = audio.set_frame_rate(16000).set_channels(1)
@@ -76,19 +76,25 @@ def process_video(client, input_path, output_path):
                 file=("chunk.wav", buffer.read()),
                 model=MODEL,
                 response_format="verbose_json",
-                language="en",
+                language=language,
                 timestamp_granularities=["segment"]
             )
             
             for segment in transcription.segments:
-                start_time = chunk_start_time_s + segment['start']
-                end_time = chunk_start_time_s + segment['end']
-                
-                if start_time < (chunk_start_time_s + (CHUNK_SIZE_MS / 1000.0)):
-                    srt_content += f"{caption_index}\n"
-                    srt_content += f"{format_srt_time(start_time)} --> {format_srt_time(end_time)}\n"
-                    srt_content += f"{segment['text'].strip()}\n\n"
-                    caption_index += 1
+                if output_format == "srt":
+                    start_time = chunk_start_time_s + segment['start']
+                    end_time = chunk_start_time_s + segment['end']
+                    
+                    if start_time < (chunk_start_time_s + (CHUNK_SIZE_MS / 1000.0)):
+                        srt_content += f"{caption_index}\n"
+                        srt_content += f"{format_srt_time(start_time)} --> {format_srt_time(end_time)}\n"
+                        srt_content += f"{segment['text'].strip()}\n\n"
+                        caption_index += 1
+                else:
+                    # TXT mode: just append text
+                    text = segment['text'].strip()
+                    if text:
+                        srt_content += f"{text}\n"
 
         except Exception as e:
             print(f"    ! Error transcribing chunk {i+1}: {e}")
@@ -114,6 +120,22 @@ def main():
         return
     client = Groq(api_key=api_key)
     print("Groq client initialized.")
+    
+    # --- CONFIGURATION INPUTS ---
+    language = input("Enter language code (default 'en'): ").strip()
+    if not language:
+        language = "en"
+        
+    # 2. Output Format
+    print("\nSelect output format:")
+    print("1. Subtitles (SRT)")
+    print("2. Plain Text (TXT)")
+    format_choice = input("Choice [1]: ").strip()
+    
+    if format_choice == '2':
+        output_format = 'txt'
+    else:
+        output_format = 'srt'
 
     # --- FOLDER SELECTION ---
     default_dir = INPUT_DIR
@@ -134,16 +156,20 @@ def main():
 
     # --- RECURSIVE OPTION ---
     recursive = input("Search recursively in subfolders? (y/n): ").strip().lower() == 'y'
+    
+    # --- FILE TYPES ---
+    extensions = {".mp4", ".mp3"}
 
     # --- FIND FILES ---
     video_files = []
     if recursive:
         for root, dirs, files in os.walk(target_dir):
             for file in files:
-                if file.lower().endswith(".mp4"):
+                if os.path.splitext(file)[1].lower() in extensions:
                     video_files.append(os.path.join(root, file))
     else:
-        video_files = [os.path.join(target_dir, f) for f in os.listdir(target_dir) if f.lower().endswith(".mp4")]
+        video_files = [os.path.join(target_dir, f) for f in os.listdir(target_dir) 
+                       if os.path.splitext(f)[1].lower() in extensions]
 
     if not video_files:
         print(f"No .mp4 files found in '{target_dir}'.")
@@ -156,16 +182,17 @@ def main():
         print(f"\n[{i+1}/{len(video_files)}] Processing: {video_path}")
         
         # Determine output path (same directory as video)
-        output_filename = os.path.splitext(os.path.basename(video_path))[0] + ".srt"
+        output_ext = ".srt" if output_format == "srt" else ".txt"
+        output_filename = os.path.splitext(os.path.basename(video_path))[0] + output_ext
         output_path = os.path.join(os.path.dirname(video_path), output_filename)
         
         if os.path.exists(output_path):
-            overwrite = input(f"Subtitle file already exists for {os.path.basename(video_path)}. Overwrite? (y/n): ").strip().lower()
+            overwrite = input(f"Output file already exists for {os.path.basename(video_path)}. Overwrite? (y/n): ").strip().lower()
             if overwrite != 'y':
                 print("Skipping...")
                 continue
                 
-        process_video(client, video_path, output_path)
+        process_video(client, video_path, output_path, language, output_format)
 
     print("\nAll files processed.")
 
