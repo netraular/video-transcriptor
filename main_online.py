@@ -63,6 +63,7 @@ def process_video(client, input_path, output_path, language="en", output_format=
     print(f"Step 4: Transcribing chunks using Groq model '{MODEL}'...")
     srt_content = ""
     caption_index = 1
+    transcription_failed = False
 
     for i, (chunk, chunk_start_time_s) in enumerate(chunks):
         print(f"  - Transcribing chunk {i+1}/{len(chunks)}...")
@@ -98,6 +99,12 @@ def process_video(client, input_path, output_path, language="en", output_format=
 
         except Exception as e:
             print(f"    ! Error transcribing chunk {i+1}: {e}")
+            transcription_failed = True
+            break
+
+    if transcription_failed:
+        print("\n❌ Transcription failed. Output file was not generated.")
+        return
 
     # --- 5. SAVING THE SRT FILE ---
     print(f"Step 5: Saving captions to {output_path}")
