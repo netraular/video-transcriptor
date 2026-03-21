@@ -20,6 +20,31 @@ MODEL = "whisper-large-v3"
 CHUNK_SIZE_MS = 5 * 60 * 1000  # 5 minutes
 OVERLAP_MS = 5 * 1000         # 5 seconds
 
+
+def get_api_keys():
+    """Loads up to 3 Groq API keys from environment in priority order."""
+    key_names = ["GROQ_API_KEY", "GROQ_API_KEY_2", "GROQ_API_KEY_3"]
+    keys = []
+
+    for key_name in key_names:
+        key_value = os.environ.get(key_name)
+        if key_value and key_value.strip():
+            keys.append((key_name, key_value.strip()))
+
+    return keys
+
+
+def is_rate_limit_error(error):
+    """Best-effort detection for API rate limit errors (HTTP 429)."""
+    status_code = getattr(error, "status_code", None)
+    message = str(error).lower()
+    return (
+        status_code == 429
+        or "error code: 429" in message
+        or "rate_limit_exceeded" in message
+        or ("rate limit" in message and "429" in message)
+    )
+
 def format_srt_time(seconds):
     """Converts seconds (float) to SRT time format HH:MM:SS,ms"""
     delta = datetime.timedelta(seconds=seconds)
@@ -45,7 +70,7 @@ def process_video(client, input_path, output_path, language="en", output_format=
     except Exception as e:
         print(f"Error during audio processing for {input_path}: {e}")
         print("Please ensure FFmpeg is installed and accessible in your system's PATH.")
-        return
+        return "failed"
 
     # --- 3. AUDIO CHUNKING ---
     print("Step 3: Chunking audio for transcription...")
@@ -63,8 +88,6 @@ def process_video(client, input_path, output_path, language="en", output_format=
     print(f"Step 4: Transcribing chunks using Groq model '{MODEL}'...")
     srt_content = ""
     caption_index = 1
-    transcription_failed = False
-
     for i, (chunk, chunk_start_time_s) in enumerate(chunks):
         print(f"  - Transcribing chunk {i+1}/{len(chunks)}...")
 
@@ -99,12 +122,10 @@ def process_video(client, input_path, output_path, language="en", output_format=
 
         except Exception as e:
             print(f"    ! Error transcribing chunk {i+1}: {e}")
-            transcription_failed = True
-            break
-
-    if transcription_failed:
-        print("\n❌ Transcription failed. Output file was not generated.")
-        return
+            print("\n❌ Transcription failed. Output file was not generated.")
+            if is_rate_limit_error(e):
+                return "rate_limit"
+            return "failed"
 
     # --- 5. SAVING THE SRT FILE ---
     print(f"Step 5: Saving captions to {output_path}")
@@ -113,6 +134,7 @@ def process_video(client, input_path, output_path, language="en", output_format=
 
     print(f"\n✅ Caption generation complete for {input_path}!")
     print(f"   Your SRT file is saved at: {output_path}")
+    return "success"
 
 def main():
     """
@@ -121,12 +143,16 @@ def main():
     # --- 1. INITIALIZATION & SETUP ---
     print("Caption Generation Script Started (Online - Groq API)")
 
-    api_key = os.environ.get("GROQ_API_KEY")
-    if not api_key:
-        print("Error: GROQ_API_KEY not found in .env file.")
+    api_keys = get_api_keys()
+    if not api_keys:
+        print("Error: No API keys found in .env.")
+        print("Add at least GROQ_API_KEY (and optionally GROQ_API_KEY_2, GROQ_API_KEY_3).")
         return
-    client = Groq(api_key=api_key)
-    print("Groq client initialized.")
+
+    current_key_index = 0
+    current_key_name, current_key_value = api_keys[current_key_index]
+    client = Groq(api_key=current_key_value)
+    print(f"Groq client initialized with {current_key_name}.")
 
     # --- CONFIGURATION INPUTS ---
     language = input("Enter language code (default 'en'): ").strip()
@@ -199,7 +225,25 @@ def main():
                 print("Skipping...")
                 continue
 
-        process_video(client, video_path, output_path, language, output_format)
+        while True:
+            result = process_video(client, video_path, output_path, language, output_format)
+
+            if result == "success":
+                break
+
+            if result == "rate_limit":
+                if current_key_index + 1 >= len(api_keys):
+                    print("No more API keys available after rate limit error. Stopping process.")
+                    return
+
+                current_key_index += 1
+                current_key_name, current_key_value = api_keys[current_key_index]
+                client = Groq(api_key=current_key_value)
+                print(f"Switched to {current_key_name}. Retrying current file from scratch...")
+                continue
+
+            print("Skipping this file due to transcription failure.")
+            break
 
     print("\nAll files processed.")
 
