@@ -158,7 +158,7 @@ def main():
     recursive = input("Search recursively in subfolders? (y/n): ").strip().lower() == 'y'
 
     # --- FILE TYPES ---
-    extensions = {".mp4", ".mp3"}
+    extensions = {".mp4", ".flac", ".mp3", ".mpga", ".m4a", ".ogg", ".wav"}
 
     # --- FIND FILES ---
     video_files = []
