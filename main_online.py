@@ -20,6 +20,36 @@ MODEL = "whisper-large-v3"
 CHUNK_SIZE_MS = 5 * 60 * 1000  # 5 minutes
 OVERLAP_MS = 5 * 1000         # 5 seconds
 
+# Supported media file types
+MEDIA_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".flac", ".mp3", ".mpga", ".m4a", ".ogg", ".wav"}
+
+
+def normalize_input_path(path):
+    """Normalize a user-provided path and strip wrapping quotes."""
+    cleaned = path.strip()
+    if cleaned.startswith('"') and cleaned.endswith('"'):
+        cleaned = cleaned[1:-1]
+    return cleaned
+
+
+def collect_media_files(target_dir, recursive):
+    """Collect media files from a directory, optionally including subfolders."""
+    files_found = []
+
+    if recursive:
+        for root, _, files in os.walk(target_dir):
+            for filename in files:
+                if os.path.splitext(filename)[1].lower() in MEDIA_EXTENSIONS:
+                    files_found.append(os.path.join(root, filename))
+    else:
+        files_found = [
+            os.path.join(target_dir, filename)
+            for filename in os.listdir(target_dir)
+            if os.path.splitext(filename)[1].lower() in MEDIA_EXTENSIONS
+        ]
+
+    return sorted(files_found)
+
 
 def get_api_keys():
     """Loads up to 3 Groq API keys from environment in priority order."""
@@ -138,7 +168,7 @@ def process_video(client, input_path, output_path, language="en", output_format=
 
 def main():
     """
-    Main function to let the user select a folder, then process all mp4 files.
+    Main function to let the user select a file or folder, then process media files.
     """
     # --- 1. INITIALIZATION & SETUP ---
     print("Caption Generation Script Started (Online - Groq API)")
@@ -170,42 +200,48 @@ def main():
     else:
         output_format = 'srt'
 
-    # --- FOLDER SELECTION ---
-    default_dir = INPUT_DIR
-    print(f"\nDefault directory: {default_dir}")
-    use_default = input("Use default directory? (y/n): ").strip().lower()
+    # --- SOURCE SELECTION ---
+    print("\nSelect input source:")
+    print("1. Single file")
+    print("2. Folder")
+    source_choice = input("Choice [2]: ").strip()
+    if not source_choice:
+        source_choice = "2"
 
-    if use_default == 'y':
-        target_dir = default_dir
-    else:
-        target_dir = input("Enter the directory path containing media files: ").strip()
-        # Remove quotes if user copied path as "path"
-        if target_dir.startswith('"') and target_dir.endswith('"'):
-            target_dir = target_dir[1:-1]
-
-    if not os.path.isdir(target_dir):
-        print(f"Error: Directory '{target_dir}' does not exist.")
-        return
-
-    # --- RECURSIVE OPTION ---
-    recursive = input("Search recursively in subfolders? (y/n): ").strip().lower() == 'y'
-
-    # --- FILE TYPES ---
-    extensions = {".mp4", ".flac", ".mp3", ".mpga", ".m4a", ".ogg", ".wav"}
-
-    # --- FIND FILES ---
     video_files = []
-    if recursive:
-        for root, dirs, files in os.walk(target_dir):
-            for file in files:
-                if os.path.splitext(file)[1].lower() in extensions:
-                    video_files.append(os.path.join(root, file))
+    if source_choice == "1":
+        file_path = normalize_input_path(input("Enter media file path: "))
+
+        if not os.path.isfile(file_path):
+            print(f"Error: File '{file_path}' does not exist.")
+            return
+
+        file_extension = os.path.splitext(file_path)[1].lower()
+        if file_extension not in MEDIA_EXTENSIONS:
+            print(f"Error: Unsupported file extension '{file_extension}'.")
+            print("Supported extensions: " + ", ".join(sorted(MEDIA_EXTENSIONS)))
+            return
+
+        video_files = [file_path]
     else:
-        video_files = [os.path.join(target_dir, f) for f in os.listdir(target_dir)
-                       if os.path.splitext(f)[1].lower() in extensions]
+        default_dir = INPUT_DIR
+        print(f"\nDefault directory: {default_dir}")
+        use_default = input("Use default directory? (y/n): ").strip().lower()
+
+        if use_default == 'y':
+            target_dir = default_dir
+        else:
+            target_dir = normalize_input_path(input("Enter the directory path containing media files: "))
+
+        if not os.path.isdir(target_dir):
+            print(f"Error: Directory '{target_dir}' does not exist.")
+            return
+
+        recursive = input("Search recursively in subfolders? (y/n): ").strip().lower() == 'y'
+        video_files = collect_media_files(target_dir, recursive)
 
     if not video_files:
-        print(f"No media files found in '{target_dir}'.")
+        print("No supported media files found for processing.")
         return
 
     print(f"\nFound {len(video_files)} media files.")

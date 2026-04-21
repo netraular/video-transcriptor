@@ -13,6 +13,36 @@ OUTPUT_DIR = "output"
 # Larger models are more accurate but require more VRAM and are slower.
 MODEL = "medium"
 
+# Supported media file types
+MEDIA_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".flac", ".mp3", ".mpga", ".m4a", ".ogg", ".wav"}
+
+
+def normalize_input_path(path):
+    """Normalize a user-provided path and strip wrapping quotes."""
+    cleaned = path.strip()
+    if cleaned.startswith('"') and cleaned.endswith('"'):
+        cleaned = cleaned[1:-1]
+    return cleaned
+
+
+def collect_media_files(target_dir, recursive):
+    """Collect media files from a directory, optionally including subfolders."""
+    files_found = []
+
+    if recursive:
+        for root, _, files in os.walk(target_dir):
+            for filename in files:
+                if os.path.splitext(filename)[1].lower() in MEDIA_EXTENSIONS:
+                    files_found.append(os.path.join(root, filename))
+    else:
+        files_found = [
+            os.path.join(target_dir, filename)
+            for filename in os.listdir(target_dir)
+            if os.path.splitext(filename)[1].lower() in MEDIA_EXTENSIONS
+        ]
+
+    return sorted(files_found)
+
 # --- HELPER FUNCTION ---
 def format_srt_time(seconds):
     """Converts seconds (float) to SRT time format HH:MM:SS,ms"""
@@ -24,8 +54,8 @@ def format_srt_time(seconds):
 
 def main():
     """
-    Main function to let the user select a video file, then extract its audio,
-    transcribe it locally with Whisper, and generate SRT captions.
+    Main function to let the user select a media file or folder, then extract audio,
+    transcribe locally with Whisper, and generate SRT captions.
     """
     # --- 1. INITIALIZATION & SETUP ---
     print("Local Caption Generation Script Started")
@@ -43,98 +73,122 @@ def main():
         print("Please ensure you have a valid model name and that you have enough memory.")
         return
 
-    # --- 2. FILE SELECTION MENU ---
-    # Find all available video files in the input directory
-    video_files = [f for f in os.listdir(INPUT_DIR) if f.endswith((".mp4", ".mov", ".avi", ".mkv"))]
+    # --- 2. SOURCE SELECTION ---
+    print("\nSelect input source:")
+    print("1. Single file")
+    print("2. Folder")
+    source_choice = input("Choice [2]: ").strip()
+    if not source_choice:
+        source_choice = "2"
 
-    if not video_files:
-        print(f"Error: No video files (.mp4, .mov, etc.) found in the '{INPUT_DIR}' directory.")
-        return
+    media_files = []
+    if source_choice == "1":
+        file_path = normalize_input_path(input("Enter media file path: "))
 
-    # Display a numbered list of files for the user to choose from
-    print("\nPlease choose a file to transcribe:")
-    for i, filename in enumerate(video_files):
-        print(f"  [{i+1}] {filename}")
-    print()
-
-    # Loop until the user provides a valid choice
-    chosen_file = None
-    while True:
-        try:
-            choice_str = input(f"Enter the number of the file (1-{len(video_files)}): ")
-            choice_index = int(choice_str) - 1
-
-            if 0 <= choice_index < len(video_files):
-                chosen_file = video_files[choice_index]
-                break
-            else:
-                print(f"Invalid number. Please enter a number between 1 and {len(video_files)}.")
-        except ValueError:
-            print("Invalid input. Please enter a number.")
-        except (KeyboardInterrupt, EOFError):
-            print("\nOperation cancelled by user.")
+        if not os.path.isfile(file_path):
+            print(f"Error: File '{file_path}' does not exist.")
             return
 
-    # --- 3. PROCESSING THE CHOSEN FILE ---
-    print(f"\n--- Processing selected file: {chosen_file} ---\n")
+        file_extension = os.path.splitext(file_path)[1].lower()
+        if file_extension not in MEDIA_EXTENSIONS:
+            print(f"Error: Unsupported file extension '{file_extension}'.")
+            print("Supported extensions: " + ", ".join(sorted(MEDIA_EXTENSIONS)))
+            return
 
-    input_path = os.path.join(INPUT_DIR, chosen_file)
-    output_filename_base = os.path.splitext(chosen_file)[0]
-    output_srt_path = os.path.join(OUTPUT_DIR, output_filename_base + ".srt")
-    temp_audio_path = os.path.join(OUTPUT_DIR, "temp_audio.wav")
+        media_files = [file_path]
+    else:
+        default_dir = INPUT_DIR
+        print(f"\nDefault directory: {default_dir}")
+        use_default = input("Use default directory? (y/n): ").strip().lower()
 
-    # --- 4. AUDIO EXTRACTION & PREPARATION ---
-    try:
-        print("Step 1: Extracting audio from video...")
-        audio = AudioSegment.from_file(input_path)
+        if use_default == "y":
+            target_dir = default_dir
+        else:
+            target_dir = normalize_input_path(input("Enter the directory path containing media files: "))
 
-        print("Step 2: Preparing audio (converting to 16kHz mono WAV)...")
-        audio = audio.set_frame_rate(16000).set_channels(1)
-        audio.export(temp_audio_path, format="wav")
-        print("Temporary audio file created successfully.")
-    except Exception as e:
-        print(f"Error during audio processing for {chosen_file}: {e}")
-        print("Please ensure FFmpeg is installed and accessible in your system's PATH.")
+        if not os.path.isdir(target_dir):
+            print(f"Error: Directory '{target_dir}' does not exist.")
+            return
+
+        recursive = input("Search recursively in subfolders? (y/n): ").strip().lower() == "y"
+        media_files = collect_media_files(target_dir, recursive)
+
+    if not media_files:
+        print("No supported media files found for processing.")
         return
 
-    # --- 5. TRANSCRIPTION ---
-    # Transcribe the entire audio file at once using local Whisper.
-    print(f"Step 3: Transcribing audio using local Whisper model '{MODEL}'...")
-    print("This may take a long time depending on the video length and your hardware (GPU is highly recommended).")
+    print(f"\nFound {len(media_files)} media files.")
 
-    try:
-        # Set language to None to allow auto-detection, or specify e.g., "en", "es", "fr"
-        transcription_result = model.transcribe(temp_audio_path, verbose=True, language="english")
-    except Exception as e:
-        print(f"    ! Error during transcription: {e}")
-        os.remove(temp_audio_path)
-        return
+    # --- 3. PROCESS FILES ---
+    for file_index, input_path in enumerate(media_files):
+        chosen_file = os.path.basename(input_path)
+        print(f"\n[{file_index + 1}/{len(media_files)}] Processing: {input_path}")
 
-    print("Transcription complete.")
+        output_filename_base = os.path.splitext(chosen_file)[0]
+        output_srt_path = os.path.join(OUTPUT_DIR, output_filename_base + ".srt")
+        temp_audio_path = os.path.join(OUTPUT_DIR, f"temp_audio_{file_index}.wav")
 
-    # --- 6. SRT FILE GENERATION ---
-    print(f"Step 4: Generating SRT file...")
-    srt_content = ""
-    for i, segment in enumerate(transcription_result['segments']):
-        start_time = segment['start']
-        end_time = segment['end']
-        text = segment['text']
+        if os.path.exists(output_srt_path):
+            overwrite = input(f"Output file already exists for {chosen_file}. Overwrite? (y/n): ").strip().lower()
+            if overwrite != "y":
+                print("Skipping...")
+                continue
 
-        srt_content += f"{i + 1}\n"
-        srt_content += f"{format_srt_time(start_time)} --> {format_srt_time(end_time)}\n"
-        srt_content += f"{text.strip()}\n\n"
+        # --- 4. AUDIO EXTRACTION & PREPARATION ---
+        try:
+            print("Step 1: Extracting audio from media file...")
+            audio = AudioSegment.from_file(input_path)
 
-    # --- 7. SAVING THE SRT FILE & CLEANUP ---
-    print(f"Step 5: Saving captions to {output_srt_path}")
-    with open(output_srt_path, "w", encoding="utf-8") as f:
-        f.write(srt_content)
+            print("Step 2: Preparing audio (converting to 16kHz mono WAV)...")
+            audio = audio.set_frame_rate(16000).set_channels(1)
+            audio.export(temp_audio_path, format="wav")
+            print("Temporary audio file created successfully.")
+        except Exception as e:
+            print(f"Error during audio processing for {chosen_file}: {e}")
+            print("Please ensure FFmpeg is installed and accessible in your system's PATH.")
+            continue
 
-    # Clean up the temporary audio file
-    os.remove(temp_audio_path)
-    print("Temporary audio file deleted.")
+        # --- 5. TRANSCRIPTION ---
+        # Transcribe the entire audio file at once using local Whisper.
+        print(f"Step 3: Transcribing audio using local Whisper model '{MODEL}'...")
+        print("This may take a long time depending on the media length and your hardware (GPU is highly recommended).")
 
-    print(f"\n✅ Caption generation complete for {chosen_file}!")
-    print(f"   Your SRT file is saved at: {output_srt_path}")
+        try:
+            # Set language to None to allow auto-detection, or specify e.g., "en", "es", "fr"
+            transcription_result = model.transcribe(temp_audio_path, verbose=True, language="english")
+        except Exception as e:
+            print(f"    ! Error during transcription: {e}")
+            if os.path.exists(temp_audio_path):
+                os.remove(temp_audio_path)
+            continue
+
+        print("Transcription complete.")
+
+        # --- 6. SRT FILE GENERATION ---
+        print("Step 4: Generating SRT file...")
+        srt_content = ""
+        for i, segment in enumerate(transcription_result["segments"]):
+            start_time = segment["start"]
+            end_time = segment["end"]
+            text = segment["text"]
+
+            srt_content += f"{i + 1}\n"
+            srt_content += f"{format_srt_time(start_time)} --> {format_srt_time(end_time)}\n"
+            srt_content += f"{text.strip()}\n\n"
+
+        # --- 7. SAVING THE SRT FILE & CLEANUP ---
+        print(f"Step 5: Saving captions to {output_srt_path}")
+        with open(output_srt_path, "w", encoding="utf-8") as f:
+            f.write(srt_content)
+
+        if os.path.exists(temp_audio_path):
+            os.remove(temp_audio_path)
+            print("Temporary audio file deleted.")
+
+        print(f"\n✅ Caption generation complete for {chosen_file}!")
+        print(f"   Your SRT file is saved at: {output_srt_path}")
+
+    print("\nAll files processed.")
 
 if __name__ == "__main__":
     main()
