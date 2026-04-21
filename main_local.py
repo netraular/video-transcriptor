@@ -81,6 +81,9 @@ def main():
     if not source_choice:
         source_choice = "2"
 
+    folder_mode = source_choice != "1"
+    only_missing_transcriptions = False
+
     media_files = []
     if source_choice == "1":
         file_path = normalize_input_path(input("Enter media file path: "))
@@ -112,6 +115,24 @@ def main():
 
         recursive = input("Search recursively in subfolders? (y/n): ").strip().lower() == "y"
         media_files = collect_media_files(target_dir, recursive)
+
+    if folder_mode:
+        only_missing_transcriptions = (
+            input("Process only files without existing transcription? (y/n): ").strip().lower() == "y"
+        )
+
+        if only_missing_transcriptions:
+            files_before_filter = len(media_files)
+            media_files = [
+                file_path
+                for file_path in media_files
+                if not os.path.exists(
+                    os.path.join(OUTPUT_DIR, os.path.splitext(os.path.basename(file_path))[0] + ".srt")
+                )
+            ]
+            skipped_existing = files_before_filter - len(media_files)
+            if skipped_existing > 0:
+                print(f"Skipping {skipped_existing} file(s) with existing transcription.")
 
     if not media_files:
         print("No supported media files found for processing.")
