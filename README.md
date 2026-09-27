@@ -1,98 +1,91 @@
 # Video Transcriptor
 
-This project generates `.srt` subtitle files from video files using two transcription modes:
+Genera subtitulos `.srt` o texto `.txt` a partir de videos usando la API online de Groq.
 
-- **Online mode** (`main_online.py`): Uses the **Groq API** (cloud) for fast transcription. Supports batch processing, folder selection, recursive search, language selection, SRT/TXT output, and MP3/MP4 input.
-- **Local mode** (`main_local.py`): Uses **OpenAI's Whisper** model running entirely on your local machine. Supports single file selection from the `input/` folder and SRT output.
+## Requisitos
 
-You can also run `main.py` which provides a launcher menu to choose between both modes.
+- Windows, macOS o Linux.
+- Python 3.8-3.12. En Windows se recomienda Python 3.12.
+- FFmpeg instalado y disponible en el `PATH`.
+- Una clave de API de Groq.
 
-## Prerequisites
+## Instalacion en Windows
 
-1.  **Python 3.8 - 3.12**: Compatible with these Python versions. If you have multiple versions installed, ensure you use a compatible one for the virtual environment.
-2.  **FFmpeg**: Required by `pydub` (and `whisper` in local mode) for handling audio/video files.
-    *   **macOS (using Homebrew):** `brew install ffmpeg`
-    *   **Ubuntu/Debian:** `sudo apt update && sudo apt install ffmpeg`
-    *   **Windows:** Download from the [official site](https://ffmpeg.org/download.html) and add the `bin` directory to your system's PATH.
-3.  **GPU (Recommended for Local mode)**: While the local script can run on a CPU, transcribing with larger Whisper models (like `medium` or `large`) will be **extremely slow** without a GPU with sufficient VRAM.
+Desde PowerShell, dentro de la carpeta del proyecto:
 
-## Setup
-
-1.  **Clone the repository:**
-    ```bash
-    git clone <your-repo-url>
-    cd video-transcriptor
-    ```
-
-2.  **Create and Activate a Virtual Environment:**
-    ```bash
-    python -m venv venv
-    ```
-    > **Note for users with multiple Python versions:** On Windows, you can use the `py` launcher:
-    > ```bash
-    > py -3.12 -m venv venv
-    > ```
-
-    Then, activate the environment:
-
-    *   **On Windows (Command Prompt):**
-        ```batch
-        venv\Scripts\activate
-        ```
-    *   **On Windows (PowerShell):**
-        ```powershell
-        .\venv\Scripts\Activate.ps1
-        ```
-    *   **On macOS/Linux:**
-        ```bash
-        source venv/bin/activate
-        ```
-
-3.  **Install dependencies:**
-
-    *   **A) (For Local mode) Install PyTorch for your GPU:**
-        Go to the [PyTorch official website](https://pytorch.org/get-started/locally/) for the correct command. Example for CUDA 12.1:
-        ```bash
-        pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-        ```
-
-    *   **B) Install all other requirements:**
-        ```bash
-        pip install -r requirements.txt
-        ```
-
-4.  **Set up your API Key (Online mode only):**
-    *   Rename `.env.example` to `.env`.
-    *   Add your Groq API key:
-        ```ini
-        GROQ_API_KEY="gsk_..."
-        ```
-
-## Usage
-
-### Launcher (recommended)
-```bash
-python main.py
+```powershell
+py -3.12 -m venv venv
+.\venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements.txt
 ```
-Choose between Online (Groq) or Local (Whisper) mode.
 
-### Run directly
-```bash
-# Online mode
+Instala FFmpeg con [winget](https://www.gyan.dev/ffmpeg/builds/) o desde la [pagina oficial](https://ffmpeg.org/download.html). Comprueba la instalacion con:
+
+```powershell
+ffmpeg -version
+```
+
+En macOS y Linux, instala FFmpeg con el gestor de paquetes del sistema.
+
+## Configuracion de Groq
+
+Crea un archivo `.env` en la raiz del proyecto con:
+
+```ini
+GROQ_API_KEY="gsk_..."
+```
+
+No compartas ni subas este archivo al repositorio.
+
+## Ejecucion
+
+Activa el entorno virtual y ejecuta:
+
+```powershell
+.\venv\Scripts\Activate.ps1
 python main_online.py
+```
 
-# Local mode
+Selecciona las opciones en este orden para generar subtitulos:
+
+1. `1` - Transcribe audio/video.
+2. `en` - Idioma del audio, o el codigo que corresponda.
+3. `1` - Salida SRT.
+4. `1` - Archivo individual.
+5. Introduce la ruta del video.
+
+El archivo `.srt` se guarda en la misma carpeta que el video. Para procesar una carpeta completa, selecciona la opcion `2` como origen.
+
+## Modo local
+
+El modo local usa OpenAI Whisper en tu propio equipo. No necesita una clave de Groq, pero es mucho mas lento y requiere mas espacio y memoria.
+
+### Instalacion adicional
+
+El modo local no esta incluido en `requirements.txt`, porque las dependencias de Whisper y PyTorch son pesadas y no hacen falta para el modo online.
+
+Con el entorno virtual activado, instala Whisper:
+
+```powershell
+pip install openai-whisper
+```
+
+Para usar una GPU NVIDIA, instala la version de PyTorch compatible con tu version de CUDA desde la [pagina oficial de PyTorch](https://pytorch.org/get-started/locally/). Por ejemplo:
+
+```powershell
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+```
+
+### Ejecucion
+
+Coloca los videos en la carpeta `input` y ejecuta:
+
+```powershell
+.\venv\Scripts\Activate.ps1
 python main_local.py
 ```
 
-## Configuration
+El script guarda los subtitulos en `output`. El modelo predeterminado es `medium`; puedes cambiarlo editando `MODEL` en `main_local.py`. Las opciones disponibles son `tiny`, `base`, `small`, `medium`, `large`, `large-v2` y `large-v3`.
 
-### Local mode
-Edit the `MODEL` variable in `main_local.py`:
-```python
-MODEL = "medium"
-# Options: "tiny", "base", "small", "medium", "large", "large-v2", "large-v3"
-```
-
-### Online mode
-Uses `whisper-large-v3` on Groq's servers. Language and output format (SRT/TXT) are configured interactively.
+Tambien puedes usar `python main.py` para abrir el menu y elegir entre el modo online y el local.
